@@ -1,5 +1,11 @@
 package catmsg
 
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+)
+
 const BUFMAX int = 4 * 1024
 
 type Message struct {
@@ -26,4 +32,38 @@ func (kvm *Message) Read(data []byte) (n int, err error) {
 	copy(data[0:n], kvm.buffer[kvm.readIndex:kvm.readIndex+n])
 	kvm.readIndex += n
 	return n, nil
+}
+
+type CommandTag = uint8
+
+const (
+	CMD_PAIR CommandTag = 1
+	CMD_DUMP CommandTag = 2
+)
+
+func MessageFromKeyValue(version uint32, key, value []byte, msg *Message) error {
+	if len(key) == 0 {
+		return errors.New("blank key")
+	}
+	if MaxKeySize < len(key) {
+		return fmt.Errorf("key too big: %d vs %d", MaxKeySize, len(key))
+	}
+	if MaxValueSize < len(value) {
+		return fmt.Errorf("value too big: %d vs %d", MaxValueSize, len(value))
+	}
+	i := 0
+	msg.buffer[i] = CMD_PAIR
+	i += 1
+	binary.LittleEndian.PutUint32(msg.buffer[i:i+4], version)
+	i += 4
+	msg.buffer[i] = uint8(len(key))
+	i += 1
+	copy(msg.buffer[i:i+len(key)], key[:])
+	i += len(key)
+	binary.LittleEndian.PutUint16(msg.buffer[i:i+2], uint16(len(value)))
+	i += 2
+	copy(msg.buffer[i:i+len(value)], value[:])
+	i += len(value)
+	msg.size = i
+	return nil
 }

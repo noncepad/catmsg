@@ -10,8 +10,9 @@ type Database struct{}
 
 // KVStore holds a fixed number of key-value pairs in one []byte
 type KVStore struct {
-	data  []byte
-	slots int
+	version uint32
+	data    []byte
+	slots   int
 }
 
 const (
@@ -23,13 +24,19 @@ const (
 // NewKVStore allocates a new store with N fixed-size slots
 func NewKVStore(slots int) *KVStore {
 	return &KVStore{
-		data:  make([]byte, slots*EntrySize),
-		slots: slots,
+		version: 0,
+		data:    make([]byte, slots*EntrySize),
+		slots:   slots,
 	}
+}
+
+func (kv *KVStore) Version() uint32 {
+	return kv.version
 }
 
 // Put inserts or updates a key/value pair
 func (kv *KVStore) Put(key, value []byte) error {
+	kv.version++
 	if len(key) > MaxKeySize {
 		return errors.New("key too long")
 	}
