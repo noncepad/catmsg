@@ -13,7 +13,7 @@ func TestDatabase(t *testing.T) {
 	mCheck["key2"] = "value2"
 	mCheck["key3"] = "value3"
 	for k, v := range mCheck {
-		err := db.Put([]byte(k), []byte(v))
+		err := db.Put([]byte(k), []byte(v), nil)
 		if err != nil {
 			t.Fatal(err)
 		}

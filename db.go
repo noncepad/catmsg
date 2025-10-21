@@ -35,7 +35,7 @@ func (kv *KVStore) Version() uint32 {
 }
 
 // Put inserts or updates a key/value pair
-func (kv *KVStore) Put(key, value []byte) error {
+func (kv *KVStore) Put(key, value []byte, msg *Message) error {
 	kv.version++
 	if len(key) > MaxKeySize {
 		return errors.New("key too long")
@@ -56,7 +56,11 @@ func (kv *KVStore) Put(key, value []byte) error {
 
 	// Write value
 	copy(kv.data[offset:offset+MaxValueSize], pad(value, MaxValueSize))
-	return nil
+	var err error
+	if msg != nil {
+		err = MessageFromKeyValue(kv.version, key, value, msg)
+	}
+	return err
 }
 
 // Get retrieves a value by key
