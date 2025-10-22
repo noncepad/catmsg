@@ -41,6 +41,8 @@ const (
 	CMD_DUMP CommandTag = 2
 )
 
+// MessageFromKeyValue converts a key value pair to a single message.
+// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
 func MessageFromKeyValue(version uint32, key, value []byte, msg *Message) error {
 	if len(key) == 0 {
 		return errors.New("blank key")
