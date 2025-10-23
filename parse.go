@@ -7,7 +7,7 @@ import (
 
 type Action interface {
 	// key and value are references, not the source of data. They must be copied.
-	OnPair(key []byte, value []byte) error
+	OnPair(message Data, key []byte, value []byte) error
 	// Send a database(s) back to the peer.
 	OnDump() error
 }
@@ -68,7 +68,7 @@ func (kv *KVStore) Parse(action Action, message Data) error {
 			if err != nil {
 				return err
 			}
-			err = action.OnPair(key, value)
+			err = action.OnPair(message, key, value)
 		}
 	case CMD_DUMP:
 		// The binary format is [CMD, 1B]

@@ -36,8 +36,28 @@ func (kv *KVStore) Version() uint32 {
 	return kv.version
 }
 
+func (kv *KVStore) Iterate(callback func(key, value []byte) error) error {
+	var err error
+	for slot := 0; slot < kv.slots; slot++ {
+		offset := slot * EntrySize
+		key := bytes.TrimRight(kv.data[offset:offset+MaxKeySize], "\x00")
+		if len(key) == 0 {
+			continue // empty slot
+		}
+		offset += MaxKeySize
+		valLen := binary.LittleEndian.Uint32(kv.data[offset : offset+4])
+		offset += 4
+		value := kv.data[offset : offset+int(valLen)]
+		err = callback(key, value)
+		if err != nil {
+			return err // stop early if callback returns false
+		}
+	}
+	return nil
+}
+
 // Put inserts or updates a key/value pair
-func (kv *KVStore) Put(key, value []byte, msg *Message) error {
+func (kv *KVStore) Put(key, value []byte, msg targetSlice) error {
 	kv.version++
 	if len(key) > MaxKeySize {
 		return errors.New("key too long")
@@ -60,7 +80,7 @@ func (kv *KVStore) Put(key, value []byte, msg *Message) error {
 	copy(kv.data[offset:offset+MaxValueSize], pad(value, MaxValueSize))
 	var err error
 	if msg != nil {
-		err = MessageFromKeyValue(kv.version, key, value, msg)
+		err = WriteKeyPair(kv.version, key, value, msg)
 	}
 	return err
 }
