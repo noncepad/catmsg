@@ -7,7 +7,7 @@ import (
 
 type Action interface {
 	// key and value are references, not the source of data. They must be copied.
-	OnPair(message Data, key []byte, value []byte) error
+	OnMessage(message Data, key []byte, value []byte) error
 	// Send a database(s) back to the peer.
 	OnDump() error
 }
@@ -25,13 +25,19 @@ func NewParser() *Parser {
 	return p
 }
 
+type Pair struct {
+	Key   []byte
+	Value []byte
+}
+
 // Parse parses and inserts a key value pair into the database.
-func (kv *KVStore) Parse(action Action, message Data) error {
+func (kv *KVStore) Parse(action Action, message Data) (*Pair, error) {
 	kv.checkVersion++
 	data := message.Slice()
 	if len(data) < 1+4+1 {
-		return ErrInsufficientBytes
+		return nil, ErrInsufficientBytes
 	}
+	var pair *Pair
 	i := 0
 	var err error
 	switch data[i] {
@@ -42,33 +48,42 @@ func (kv *KVStore) Parse(action Action, message Data) error {
 			checkVersion := binary.LittleEndian.Uint32(data[i : i+4])
 			i += 4
 			if kv.checkVersion != checkVersion {
-				return fmt.Errorf("version mismatch: %d vs %d", kv.checkVersion, data[i])
+				return nil, fmt.Errorf("version mismatch: %d vs %d", kv.checkVersion, data[i])
 			}
 			keySize := int(data[i])
 			i += 1
 			if MaxKeySize < keySize {
-				return ErrKeyTooBig
+				return nil, ErrKeyTooBig
 			}
 			if len(data)-i < keySize {
-				return ErrInsufficientBytes
+				return nil, ErrInsufficientBytes
 			}
 			key := data[i : i+keySize]
 			i += keySize
 			if len(data)-i < 2 {
-				return ErrInsufficientBytes
+				return nil, ErrInsufficientBytes
 			}
 			valueSize := int(binary.LittleEndian.Uint16(data[i : i+2]))
 			i += 2
 			if len(data)-i < valueSize {
-				return ErrInsufficientBytes
+				return nil, ErrInsufficientBytes
 			}
 			value := data[i : i+valueSize]
 
 			err = kv.Put(key, value, nil)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			err = action.OnPair(message, key, value)
+			err = action.OnMessage(message, key, value)
+			if err != nil {
+				return nil, err
+			}
+			pair = new(Pair)
+			pair.Key = make([]byte, len(key))
+			copy(pair.Key[:], key[:])
+			pair.Value = make([]byte, len(value))
+			copy(pair.Value[:], value[:])
+
 		}
 	case CMD_DUMP:
 		// The binary format is [CMD, 1B]
@@ -76,5 +91,5 @@ func (kv *KVStore) Parse(action Action, message Data) error {
 	default:
 		err = fmt.Errorf("unknown command %d", data[i])
 	}
-	return err
+	return pair, err
 }
