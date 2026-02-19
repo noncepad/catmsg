@@ -32,7 +32,7 @@ type Pair struct {
 
 // Parse parses and inserts a key value pair into the database.
 func (kv *KVStore) Parse(action Action, message Data) (*Pair, error) {
-	kv.checkVersion++
+	kv.nonce++
 	data := message.Slice()
 	if len(data) < 1+4+1 {
 		return nil, ErrInsufficientBytes
@@ -45,10 +45,10 @@ func (kv *KVStore) Parse(action Action, message Data) (*Pair, error) {
 		// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
 		{
 			i += 1
-			checkVersion := binary.LittleEndian.Uint32(data[i : i+4])
+			checkNonce := binary.LittleEndian.Uint32(data[i : i+4])
 			i += 4
-			if kv.checkVersion != checkVersion {
-				return nil, fmt.Errorf("version mismatch: %d vs %d", kv.checkVersion, data[i])
+			if kv.nonce != checkNonce {
+				return nil, fmt.Errorf("version mismatch: %d vs %d", kv.nonce, checkNonce)
 			}
 			keySize := int(data[i])
 			i += 1

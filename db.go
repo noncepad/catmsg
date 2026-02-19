@@ -10,10 +10,9 @@ type Database struct{}
 
 // KVStore holds a fixed number of key-value pairs in one []byte
 type KVStore struct {
-	checkVersion uint32
-	version      uint32
-	data         []byte
-	slots        int
+	nonce uint32
+	data  []byte
+	slots int
 }
 
 const (
@@ -25,15 +24,15 @@ const (
 // NewKVStore allocates a new store with N fixed-size slots
 func NewKVStore(slots int) *KVStore {
 	return &KVStore{
-		version:      0,
-		checkVersion: 0,
-		data:         make([]byte, slots*EntrySize),
-		slots:        slots,
+		nonce: 0,
+		data:  make([]byte, slots*EntrySize),
+		slots: slots,
 	}
 }
 
-func (kv *KVStore) Version() uint32 {
-	return kv.version
+// this number increments on each message sent out to the bot
+func (kv *KVStore) Nonce() uint32 {
+	return kv.nonce
 }
 
 func (kv *KVStore) Iterate(callback func(key, value []byte) error) error {
@@ -58,7 +57,7 @@ func (kv *KVStore) Iterate(callback func(key, value []byte) error) error {
 
 // Put inserts or updates a key/value pair
 func (kv *KVStore) Put(key, value []byte, msg targetSlice) error {
-	kv.version++
+	kv.nonce++
 	if len(key) > MaxKeySize {
 		return errors.New("key too long")
 	}
@@ -80,7 +79,7 @@ func (kv *KVStore) Put(key, value []byte, msg targetSlice) error {
 	copy(kv.data[offset:offset+MaxValueSize], pad(value, MaxValueSize))
 	var err error
 	if msg != nil {
-		err = WriteKeyPair(kv.version, key, value, msg)
+		err = WriteKeyPair(kv.nonce, key, value, msg)
 	}
 	return err
 }

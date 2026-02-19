@@ -46,7 +46,7 @@ type targetSlice interface {
 	Slice() []byte
 }
 
-func WriteKeyPair(version uint32, key, value []byte, target targetSlice) error {
+func WriteKeyPair(nonce uint32, key, value []byte, target targetSlice) error {
 	// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
 	size := 1 + 4 + 1 + len(key) + 2 + len(value)
 	target.Reset(size)
@@ -66,7 +66,7 @@ func WriteKeyPair(version uint32, key, value []byte, target targetSlice) error {
 	i := 0
 	data[i] = CMD_PAIR
 	i += 1
-	binary.LittleEndian.PutUint32(data[i:i+4], version)
+	binary.LittleEndian.PutUint32(data[i:i+4], nonce)
 	i += 4
 	data[i] = uint8(len(key))
 	i += 1
@@ -84,7 +84,7 @@ func WriteKeyPair(version uint32, key, value []byte, target targetSlice) error {
 
 // MessageFromKeyValue converts a key value pair to a single message.
 // The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
-func MessageFromKeyValue(version uint32, key, value []byte, msg *Message) error {
+func MessageFromKeyValue(nonce uint32, key, value []byte, msg *Message) error {
 	if len(key) == 0 {
 		return errors.New("blank key")
 	}
@@ -97,7 +97,7 @@ func MessageFromKeyValue(version uint32, key, value []byte, msg *Message) error 
 	i := 0
 	msg.buffer[i] = CMD_PAIR
 	i += 1
-	binary.LittleEndian.PutUint32(msg.buffer[i:i+4], version)
+	binary.LittleEndian.PutUint32(msg.buffer[i:i+4], nonce)
 	i += 4
 	msg.buffer[i] = uint8(len(key))
 	i += 1
