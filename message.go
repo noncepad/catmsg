@@ -37,8 +37,11 @@ func (kvm *Message) Read(data []byte) (n int, err error) {
 type CommandTag = uint8
 
 const (
-	CMD_PAIR CommandTag = 1
-	CMD_DUMP CommandTag = 2
+	CMD_PAIR   CommandTag = 1
+	CMD_DUMP   CommandTag = 2
+	CMD_PONG   CommandTag = 3
+	CMD_CUSTOM CommandTag = 4
+	CMD_PUBKEY CommandTag = 5
 )
 
 type targetSlice interface {
