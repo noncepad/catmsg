@@ -3,5 +3,5 @@ package catmsg
 const (
 	ENV_MOTHERSHIP_WALLET string = "MOTHERSHIP_WALLET"
 	ENV_RUNTIME_PIPELINE  string = "PIPELINE"
-	ENV_DEBUG             string = "DEBUG"
+	ENV_LOG_LEVEL         string = "LOG_LEVEL"
 )

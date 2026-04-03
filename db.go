@@ -10,9 +10,10 @@ type Database struct{}
 
 // KVStore holds a fixed number of key-value pairs in one []byte
 type KVStore struct {
-	nonce uint32
-	data  []byte
-	slots int
+	nonce    uint32
+	nonceOut uint32
+	data     []byte
+	slots    int
 }
 
 const (
@@ -24,9 +25,10 @@ const (
 // NewKVStore allocates a new store with N fixed-size slots
 func NewKVStore(slots int) *KVStore {
 	return &KVStore{
-		nonce: 0,
-		data:  make([]byte, slots*EntrySize),
-		slots: slots,
+		nonce:    0,
+		nonceOut: 0,
+		data:     make([]byte, slots*EntrySize),
+		slots:    slots,
 	}
 }
 
@@ -57,7 +59,6 @@ func (kv *KVStore) Iterate(callback func(key, value []byte) error) error {
 
 // Put inserts or updates a key/value pair
 func (kv *KVStore) Put(key, value []byte, msg targetSlice) error {
-	kv.nonce++
 	if len(key) > MaxKeySize {
 		return errors.New("key too long")
 	}
@@ -79,7 +80,7 @@ func (kv *KVStore) Put(key, value []byte, msg targetSlice) error {
 	copy(kv.data[offset:offset+MaxValueSize], pad(value, MaxValueSize))
 	var err error
 	if msg != nil {
-		err = WriteKeyPair(kv.nonce, key, value, msg)
+		err = WriteKeyPair(key, value, msg)
 	}
 	return err
 }

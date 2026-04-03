@@ -2,6 +2,7 @@ package catmsg
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -43,60 +44,86 @@ func (kv *KVStore) Parse(action Action, message Data) (*Pair, error) {
 	if len(data) < 1+4+1 {
 		return nil, ErrInsufficientBytes
 	}
-	var pair *Pair
-	i := 0
-	cmdValue := data[i]
+	// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
 	var err error
-	i += 1
-	checkNonce := binary.LittleEndian.Uint32(data[i : i+4])
-	i += 4
-	kv.nonce++
-	if kv.nonce != checkNonce {
-		return nil, fmt.Errorf("version mismatch: %d vs %d", kv.nonce, checkNonce)
+	var cmdValue uint8
+	var checkNonce uint32
+	pair := new(Pair)
+	i := 0
+	{
+		target := 1
+		if len(data)-i < target {
+			return nil, ErrInsufficientBytes
+		}
+		cmdValue = data[i]
+		i += target
 	}
-	keySize := int(data[i])
-	i += 1
-	if MaxKeySize < keySize {
-		return nil, ErrKeyTooBig
+	{
+		target := 4
+		if len(data)-i < target {
+			return nil, ErrInsufficientBytes
+		}
+		checkNonce = binary.LittleEndian.Uint32(data[i : i+target])
+		i += target
+		if kv.nonce != checkNonce {
+			// log.Printf("version mismatch: %d vs %d", kv.nonce, checkNonce)
+			return nil, fmt.Errorf("version mismatch: %d vs %d", kv.nonce, checkNonce)
+		}
+		kv.nonce++
 	}
-	if len(data)-i < keySize {
-		return nil, ErrInsufficientBytes
+	{
+		target := 1
+		keySize := int(data[i])
+		i += target
+		if MaxKeySize < keySize {
+			return nil, ErrKeyTooBig
+		}
+		target = keySize
+		if len(data)-i < target {
+			return nil, ErrInsufficientBytes
+		}
+		pair.Key = make([]byte, target)
+		copy(pair.Key, data[i:i+target])
+		i += target
 	}
-	key := data[i : i+keySize]
-	i += keySize
-	valueSize := int(binary.LittleEndian.Uint16(data[i : i+2]))
-	i += 2
-	if len(data)-i < valueSize {
-		return nil, ErrInsufficientBytes
+	{
+		target := 2
+		if len(data)-i < target {
+			return nil, ErrInsufficientBytes
+		}
+		valueSize := int(binary.LittleEndian.Uint16(data[i : i+target]))
+		i += target
+		target = valueSize
+		if len(data)-i < target {
+			return nil, ErrInsufficientBytes
+		}
+		pair.Value = make([]byte, target)
+		copy(pair.Value, data[i:i+target])
+		i += target
+		if i < len(data) {
+			return nil, fmt.Errorf("failed to read all data: %d %d", i, len(data))
+		}
 	}
-	value := data[i : i+valueSize]
-
-	err = kv.Put(key, value, nil)
+	err = kv.Put(pair.Key, pair.Value, nil)
 	if err != nil {
 		return nil, err
 	}
-	pair = new(Pair)
-	pair.Key = make([]byte, len(key))
-	copy(pair.Key[:], key[:])
-	pair.Value = make([]byte, len(value))
-	copy(pair.Value[:], value[:])
 	switch cmdValue {
 	case CMD_PAIR:
-		// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
-		err = action.OnMessage(message, pair.Key, pair.Value)
-		if err != nil {
-			return nil, err
-		}
+		err = errors.New("PAIR not supported")
+		return nil, err
 	case CMD_DUMP:
 		// The binary format is [CMD, 1B]
 		err = action.OnDump()
 	case CMD_PONG:
 		// The binary format is [CMD, 1B][version,4B uint32][key_size,1B uint8][key,?B][value_size,2B uint16][value,?B]
-		err = kv.Put(key, value, nil)
-		if err != nil {
-			return nil, err
+		v := binary.LittleEndian.Uint64(pair.Value)
+		log.Printf("PONG: value %+v; v %d", pair.Value, v)
+		if v == 0 {
+			return nil, errors.New("blank Pong timestamp")
 		}
-		err = action.OnPong(time.Unix(int64(binary.LittleEndian.Uint64(value)), 0))
+
+		err = action.OnPong(time.Unix(int64(v), 0))
 		if err != nil {
 			return nil, err
 		}
@@ -106,14 +133,14 @@ func (kv *KVStore) Parse(action Action, message Data) (*Pair, error) {
 			return nil, err
 		}
 	case CMD_PUBKEY:
-		if len(value) != sgo.PublicKeyLength {
-			return nil, fmt.Errorf("bad public key length: %d", len(value))
+		if len(pair.Value) != sgo.PublicKeyLength {
+			return nil, fmt.Errorf("bad public key length: %d", len(pair.Value))
 		}
 		var pubkey sgo.PublicKey
-		if copy(pubkey[:], value) != sgo.PublicKeyLength {
-			return nil, fmt.Errorf("bad public key length: %d", len(value))
+		if copy(pubkey[:], pair.Value) != sgo.PublicKeyLength {
+			return nil, fmt.Errorf("bad public key length: %d", len(pair.Value))
 		}
-		err = action.OnWallet(key, pubkey)
+		err = action.OnWallet(pair.Key, pubkey)
 		if err != nil {
 			return nil, err
 		}
