@@ -4,13 +4,30 @@ import (
 	"encoding/binary"
 )
 
-const BUFMAX int = 4 * 1024
+const (
+	BUFMAX int = 4 * 1024
+)
 
 type Message struct {
 	size      int
 	buffer    [BUFMAX]byte
 	readIndex int
 	nonce     uint32
+}
+
+type FixedPair struct {
+	lenK  int
+	key   [MaxKeySize]byte
+	lenV  int
+	value [MaxValueSize]byte
+}
+
+func (fp *FixedPair) Key() []byte {
+	return fp.key[:fp.lenK]
+}
+
+func (fp *FixedPair) Value() []byte {
+	return fp.value[:fp.lenV]
 }
 
 func (kvm *Message) Reset(size int) error {

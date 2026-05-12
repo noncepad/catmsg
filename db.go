@@ -4,7 +4,7 @@ type Database struct{}
 
 const (
 	MaxKeySize   = 64
-	MaxValueSize = 1024
+	MaxValueSize = BUFMAX - MaxKeySize - 128
 	EntrySize    = MaxKeySize + 4 + MaxValueSize // 1092 bytes
 )
 
