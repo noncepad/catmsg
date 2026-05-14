@@ -154,34 +154,34 @@ func (p *ExternalDeserializer) Parse(message Message) error {
 	return err
 }
 
-func (xp *FixedPair) extractPair(remainingData []byte) (FixedPair, error) {
+func (fp *FixedPair) extractPair(remainingData []byte) (FixedPair, error) {
 	// key value
 	k := 0
 	if len(remainingData[k:]) != 1 {
-		return *xp, ErrInsufficientBytes
+		return *fp, ErrInsufficientBytes
 	}
-	xp.lenK = int(remainingData[k])
+	fp.lenK = int(remainingData[k])
 	k++
-	if xp.lenK == 0 || MaxKeySize < xp.lenK {
-		return *xp, errors.New("bad key size")
+	if fp.lenK == 0 || MaxKeySize < fp.lenK {
+		return *fp, errors.New("bad key size")
 	}
-	copy(xp.key[:xp.lenK], remainingData[k:k+xp.lenK])
-	k += xp.lenK
+	copy(fp.key[:fp.lenK], remainingData[k:k+fp.lenK])
+	k += fp.lenK
 	if len(remainingData[k:]) < 2 {
-		return *xp, ErrInsufficientBytes
+		return *fp, ErrInsufficientBytes
 	}
-	xp.lenV = int(binary.LittleEndian.Uint16(remainingData[k : k+2]))
-	if MaxValueSize < xp.lenV {
-		return *xp, errors.New("bad value size")
+	fp.lenV = int(binary.LittleEndian.Uint16(remainingData[k : k+2]))
+	if MaxValueSize < fp.lenV {
+		return *fp, errors.New("bad value size")
 	}
 	k += 2
-	if len(remainingData[k:]) < xp.lenV {
-		return *xp, ErrInsufficientBytes
+	if len(remainingData[k:]) < fp.lenV {
+		return *fp, ErrInsufficientBytes
 	}
-	copy(xp.value[:xp.lenV], remainingData[k:k+xp.lenV])
-	k += xp.lenV
+	copy(fp.value[:fp.lenV], remainingData[k:k+fp.lenV])
+	k += fp.lenV
 	if len(remainingData[k:]) != 0 {
-		return *xp, fmt.Errorf("mismatch data size: %d vs %d", 0, len(remainingData[k:]))
+		return *fp, fmt.Errorf("mismatch data size: %d vs %d", 0, len(remainingData[k:]))
 	}
-	return *xp, nil
+	return *fp, nil
 }
