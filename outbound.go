@@ -52,6 +52,7 @@ func (p *ExternalSerializer) writeHeader(cmdTag CommandTag, bodySize int) {
 	p.buffer[p.index] = cmdTag
 	p.index += 1
 	p.buffer[p.index] = p.version
+	p.index += 1
 	binary.LittleEndian.PutUint32(p.buffer[p.index:(p.index+4)], p.nonce)
 	p.nonce++
 	p.index += 4
@@ -82,17 +83,13 @@ func (p *ExternalSerializer) Custom(custom customMessage) error {
 	if value == nil {
 		return errors.New("blank value")
 	}
-	p.writeHeader(CmdCustom, 1+len(key)+2+len(value))
-
-	//	if len(key) == 0 {
-	//		return errors.New("blank key")
-	//	}
 	if MaxKeySize < len(key) {
 		return fmt.Errorf("key too big: %d vs %d", MaxKeySize, len(key))
 	}
 	if MaxValueSize < len(value) {
 		return fmt.Errorf("value too big: %d vs %d", MaxValueSize, len(value))
 	}
+	p.writeHeader(CmdCustom, 1+len(key)+2+len(value))
 	p.buffer[p.index] = uint8(len(key))
 	p.index += 1
 	copy(p.buffer[p.index:p.index+len(key)], key[:])
