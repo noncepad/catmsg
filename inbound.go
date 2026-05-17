@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"log"
 	"log/slog"
 	"time"
 
@@ -29,11 +28,13 @@ type Data interface {
 	Slice() []byte
 }
 type ExternalDeserializer struct {
-	logger  *slog.Logger
-	xp      *FixedPair
-	nonce   uint32
-	version Version
-	action  MessageInboundCallback
+	logger         *slog.Logger
+	xp             *FixedPair
+	nonce          uint32
+	version        Version
+	action         MessageInboundCallback
+	index          int
+	leftoverBuffer []byte
 }
 
 func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger) *ExternalDeserializer {
@@ -42,6 +43,8 @@ func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger)
 	p.logger = logger
 	p.nonce = 0
 	p.version = ProtoclV1
+	p.index = 0
+	p.leftoverBuffer = make([]byte, MaxValueSize*2)
 	p.xp = new(FixedPair)
 	return p
 }
@@ -54,104 +57,141 @@ func (p *ExternalDeserializer) Nonce() uint32 {
 	return p.nonce
 }
 
-func (p *ExternalDeserializer) Parse(message Message) error {
-	if p.nonce != message.nonce {
-		return fmt.Errorf("mismatch nonce: %d vs %d", p.nonce, message.nonce)
+func (p *ExternalDeserializer) Parse(indata []byte) error {
+	var data []byte
+	if p.index > 0 {
+		combined := make([]byte, p.index+len(indata))
+		copy(combined, p.leftoverBuffer[:p.index])
+		copy(combined[p.index:], indata)
+		data = combined
+		p.index = 0
+	} else {
+		data = indata
 	}
-	p.nonce++
-	data := message.Slice()
-	if len(data) < headerSize {
-		return ErrInsufficientBytes
-	}
-	// The binary format is [CMD, 1B][version,1B][nonce,4B uint32]
-	var err error
-	var cmdValue uint8
-	var checkVersion uint8
-	var checkNonce uint32
+
 	i := 0
-	{
-		target := 1
-		if len(data)-i < target {
-			return ErrInsufficientBytes
+loop:
+	for i < len(data) {
+		msgStart := i
+
+		if len(data)-i < headerSize {
+			i = msgStart
+			break
 		}
-		cmdValue = data[i]
-		i += target
-	}
-	{
-		target := 1
-		if len(data)-i < target {
-			return ErrInsufficientBytes
-		}
-		checkVersion = data[i]
-		i += target
+
+		cmdValue := data[i]
+		i++
+		checkVersion := data[i]
+		i++
 		if p.version != checkVersion {
 			return fmt.Errorf("version mismatch: %d vs %d", p.version, checkVersion)
 		}
-	}
-	{
-		target := 4
-		if len(data)-i < target {
-			return ErrInsufficientBytes
-		}
-		checkNonce = binary.LittleEndian.Uint32(data[i : i+target])
-		i += target
+		checkNonce := binary.LittleEndian.Uint32(data[i : i+4])
+		i += 4
 		if p.nonce != checkNonce {
 			return fmt.Errorf("nonce mismatch: %d vs %d", p.nonce, checkNonce)
 		}
+
+		payload := data[i:]
+		var consumed int
+		var err error
+
+		switch cmdValue {
+		case CmdDump:
+			consumed = 0
+			err = p.action.OnDump()
+		case CmdPong:
+			if len(payload) < 8 {
+				i = msgStart
+				break loop
+			}
+			v := binary.LittleEndian.Uint64(payload[:8])
+			if v == 0 {
+				return errors.New("blank Pong timestamp")
+			}
+			err = p.action.OnPong(time.Unix(int64(v), 0))
+			consumed = 8
+		case CmdPubkey:
+			var pair FixedPair
+			pair, consumed, err = extractPairV2(payload)
+			if err == ErrInsufficientBytes {
+				i = msgStart
+				break loop
+			}
+			if err != nil {
+				return err
+			}
+			if pair.lenV != sgo.PublicKeyLength {
+				return fmt.Errorf("bad public key length: %d", pair.lenV)
+			}
+			var pubkey sgo.PublicKey
+			copy(pubkey[:], pair.Value())
+			err = p.action.OnPubkey(pair.Key(), pubkey)
+		case CmdCustom:
+			var pair FixedPair
+			pair, consumed, err = extractPairV2(payload)
+			if err == ErrInsufficientBytes {
+				i = msgStart
+				break loop
+			}
+			if err != nil {
+				return err
+			}
+			err = p.action.OnCustom(pair)
+		default:
+			return fmt.Errorf("unknown command %d", cmdValue)
+		}
+
+		if err != nil {
+			return err
+		}
+		i += consumed
 		p.nonce++
 	}
-	remainingData := data[i:]
-	switch cmdValue {
-	case CmdDump:
-		// The binary format is [CMD, 1B]
-		err = p.action.OnDump()
-	case CmdPong:
-		if len(remainingData) != 8 {
-			return ErrInsufficientBytes
+
+	leftover := len(data) - i
+	if leftover > 0 {
+		if leftover > len(p.leftoverBuffer) {
+			p.leftoverBuffer = make([]byte, leftover)
 		}
-		v := binary.LittleEndian.Uint64(remainingData)
-		if v == 0 {
-			return errors.New("blank Pong timestamp")
-		}
-		t := time.Unix(int64(v), 0)
-		p.logger.Debug(fmt.Sprintf("PONG: value %s", t))
-		err = p.action.OnPong(t)
-		if err != nil {
-			return err
-		}
-	case CmdPubkey:
-		var pair FixedPair
-		pair, err = p.xp.extractPair(remainingData)
-		if err != nil {
-			return err
-		}
-		if pair.lenV != sgo.PublicKeyLength {
-			return fmt.Errorf("bad public key length: %d", pair.lenV)
-		}
-		var pubkey sgo.PublicKey
-		if copy(pubkey[:], pair.Value()) != sgo.PublicKeyLength {
-			return fmt.Errorf("bad public key length: %d", pair.lenV)
-		}
-		err = p.action.OnPubkey(pair.Key(), pubkey)
-		if err != nil {
-			return err
-		}
-	case CmdCustom:
-		// key value
-		var pair FixedPair
-		pair, err = p.xp.extractPair(remainingData)
-		if err != nil {
-			return err
-		}
-		err = p.action.OnCustom(pair)
-		if err != nil {
-			return err
-		}
-	default:
-		err = fmt.Errorf("unknown command %d", data[i])
+		copy(p.leftoverBuffer, data[i:])
+		p.index = leftover
+	} else {
+		p.index = 0
 	}
-	log.Printf("___kv nonce %d", p.nonce)
-	return err
+	return nil
+}
+
+func extractPairV2(data []byte) (FixedPair, int, error) {
+	var fp FixedPair
+	k := 0
+	if len(data)-k < 1 {
+		return fp, 0, ErrInsufficientBytes
+	}
+	fp.lenK = int(data[k])
+	k++
+	if fp.lenK == 0 || MaxKeySize < fp.lenK {
+		return fp, 0, errors.New("bad key size")
+	}
+	if len(data)-k < fp.lenK {
+		return fp, 0, ErrInsufficientBytes
+	}
+	copy(fp.key[:fp.lenK], data[k:k+fp.lenK])
+	k += fp.lenK
+	if len(data)-k < 2 {
+		return fp, 0, ErrInsufficientBytes
+	}
+	fp.lenV = int(binary.LittleEndian.Uint16(data[k : k+2]))
+	if MaxValueSize < fp.lenV {
+		return fp, 0, errors.New("bad value size")
+	}
+	k += 2
+	if len(data)-k < fp.lenV {
+		return fp, 0, ErrInsufficientBytes
+	}
+	copy(fp.value[:fp.lenV], data[k:k+fp.lenV])
+	k += fp.lenV
+	return fp, k, nil
 }
 
 func (fp *FixedPair) extractPair(remainingData []byte) (FixedPair, error) {

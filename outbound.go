@@ -14,7 +14,8 @@ type ExternalSerializer struct {
 	version    Version
 	blankKey   []byte
 	byteUint64 []byte
-	msg        Message
+	index      int
+	buffer     []byte
 }
 
 func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
@@ -24,6 +25,8 @@ func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
 	s.version = ProtoclV1
 	s.blankKey = make([]byte, 0)
 	s.byteUint64 = make([]byte, 8)
+	s.index = 0
+	s.buffer = make([]byte, BUFMAX)
 	return s
 }
 
@@ -40,44 +43,29 @@ func (p *ExternalSerializer) Nonce() uint32 {
 const headerSize = 1 + 1 + 4
 
 // The binary format is [CMD, 1B][version,1B][nonce, 4B uint32][some fixed size message that can be parsed by cmd tag]
-func (p *ExternalSerializer) writeHeader(cmdTag CommandTag, bodySize int) ([]byte, error) {
-	target := p.msg
-	size := headerSize + bodySize
-	err := target.Reset(size)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resize to %d: %s", size, err)
+func (p *ExternalSerializer) writeHeader(cmdTag CommandTag, bodySize int) {
+	if len(p.buffer) < p.index+headerSize+bodySize {
+		buffer := make([]byte, len(p.buffer)+p.index+headerSize+bodySize+BUFMAX)
+		copy(buffer[0:p.index], p.buffer[0:p.index])
+		p.buffer = buffer
 	}
-	data := target.Slice()
-	if len(data) != size {
-		return nil, ErrInsufficientBytes
-	}
-	i := 0
-	data[i] = cmdTag
-	i += 1
-	data[i] = p.version
-	i += 1
-	binary.LittleEndian.PutUint32(data[i:i+4], p.nonce)
+	p.buffer[p.index] = cmdTag
+	p.index += 1
+	p.buffer[p.index] = p.version
+	binary.LittleEndian.PutUint32(p.buffer[p.index:(p.index+4)], p.nonce)
 	p.nonce++
-	i += 4
-
-	return data[i:], nil
+	p.index += 4
 }
 
-func (p *ExternalSerializer) Ping(t time.Time) (Message, error) {
-	slice, err := p.writeHeader(CmdPing, 8)
-	if err != nil {
-		return p.msg, err
-	}
+func (p *ExternalSerializer) Ping(t time.Time) {
+	p.writeHeader(CmdPing, 8)
+	slice := p.buffer[p.index:(p.index + 8)]
+	p.index += 8
 	binary.LittleEndian.PutUint64(slice, uint64(t.Unix()))
-	return p.msg, nil
 }
 
-func (p *ExternalSerializer) Shutdown() (Message, error) {
-	_, err := p.writeHeader(CmdShutdown, 0)
-	if err != nil {
-		return p.msg, err
-	}
-	return p.msg, nil
+func (p *ExternalSerializer) Shutdown() {
+	p.writeHeader(CmdShutdown, 0)
 }
 
 type customMessage interface {
@@ -85,40 +73,40 @@ type customMessage interface {
 	Value() []byte
 }
 
-func (p *ExternalSerializer) Custom(custom customMessage) (Message, error) {
+func (p *ExternalSerializer) Custom(custom customMessage) error {
 	key := custom.Key()
 	value := custom.Value()
 	if key == nil {
-		return p.msg, errors.New("blank key")
+		return errors.New("blank key")
 	}
 	if value == nil {
-		return p.msg, errors.New("blank value")
+		return errors.New("blank value")
 	}
-	data, err := p.writeHeader(CmdCustom, 1+len(key)+2+len(value))
-	if err != nil {
-		return p.msg, err
-	}
+	p.writeHeader(CmdCustom, 1+len(key)+2+len(value))
 
 	//	if len(key) == 0 {
 	//		return errors.New("blank key")
 	//	}
 	if MaxKeySize < len(key) {
-		return p.msg, fmt.Errorf("key too big: %d vs %d", MaxKeySize, len(key))
+		return fmt.Errorf("key too big: %d vs %d", MaxKeySize, len(key))
 	}
 	if MaxValueSize < len(value) {
-		return p.msg, fmt.Errorf("value too big: %d vs %d", MaxValueSize, len(value))
+		return fmt.Errorf("value too big: %d vs %d", MaxValueSize, len(value))
 	}
-	i := 0
-	data[i] = uint8(len(key))
-	i += 1
-	copy(data[i:i+len(key)], key[:])
-	i += len(key)
-	binary.LittleEndian.PutUint16(data[i:i+2], uint16(len(value)))
-	i += 2
-	copy(data[i:i+len(value)], value[:])
-	i += len(value)
-	if i != len(data) {
-		panic(fmt.Errorf("bad size matching: %d vs %d", i, len(data)))
-	}
-	return p.msg, nil
+	p.buffer[p.index] = uint8(len(key))
+	p.index += 1
+	copy(p.buffer[p.index:p.index+len(key)], key[:])
+	p.index += len(key)
+	binary.LittleEndian.PutUint16(p.buffer[p.index:p.index+2], uint16(len(value)))
+	p.index += 2
+	copy(p.buffer[p.index:p.index+len(value)], value[:])
+	p.index += len(value)
+	return nil
+}
+
+// Flush dumps a byte slice of written data. the index resets to 0.
+func (p *ExternalSerializer) Flush() []byte {
+	i := p.index
+	p.index = 0
+	return p.buffer[0:i]
 }
