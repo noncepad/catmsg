@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	sgo "git.noncepad.com/pkg/solana-go"
+	sgo "github.com/gagliardetto/solana-go"
 )
 
 // MessageInboundCallback handles messages after they have been parsed by Parser.
