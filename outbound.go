@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	sgo "github.com/gagliardetto/solana-go"
 )
 
 type ExternalSerializer struct {
@@ -16,9 +18,10 @@ type ExternalSerializer struct {
 	byteUint64 []byte
 	index      int
 	buffer     []byte
+	localKey   sgo.PrivateKey
 }
 
-func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
+func NewExternalSerializer(logger *slog.Logger, key sgo.PrivateKey) *ExternalSerializer {
 	s := new(ExternalSerializer)
 	s.logger = logger
 	s.nonce = 0
@@ -27,7 +30,12 @@ func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
 	s.byteUint64 = make([]byte, 8)
 	s.index = 0
 	s.buffer = make([]byte, BUFMAX)
+	s.localKey = key
 	return s
+}
+
+func (p *ExternalSerializer) OnHandshake(pubkey sgo.PublicKey) error {
+	return nil
 }
 
 func (p *ExternalSerializer) Version() Version {

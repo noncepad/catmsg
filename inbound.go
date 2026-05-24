@@ -7,19 +7,21 @@ import (
 	"log/slog"
 	"time"
 
+	common "git.noncepad.com/pkg/solpipe-util/common"
 	sgo "github.com/gagliardetto/solana-go"
 )
 
 // MessageInboundCallback handles messages after they have been parsed by Parser.
 type MessageInboundCallback interface {
 	// OnPubkey is for sending a Public Key with a name tag.
-	OnPubkey(key []byte, pubkey sgo.PublicKey) error
+	OnHandshake(pubkey sgo.PublicKey) error
 	// OnDump has it where a key and value are references, not the source of data. They must be copied.
 	// OnMessage(message Data, key []byte, value []byte) error
 	// Send a database(s) back to the peer.
 	OnDump() error
 	// OnPong indicates the web assembly bot has responded with a Pong to a Ping
 	OnPong(time.Time) error
+	OnPubkey(name []byte, pubkey sgo.PublicKey) error
 	// OnCustom is for custom messages.
 	OnCustom(FixedPair) error
 }
@@ -35,9 +37,11 @@ type ExternalDeserializer struct {
 	action         MessageInboundCallback
 	index          int
 	leftoverBuffer []byte
+	stream         *common.EncryptedStream
+	localKey       sgo.PrivateKey
 }
 
-func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger) *ExternalDeserializer {
+func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger, key sgo.PrivateKey) *ExternalDeserializer {
 	p := new(ExternalDeserializer)
 	p.action = action
 	p.logger = logger
@@ -46,7 +50,12 @@ func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger)
 	p.index = 0
 	p.leftoverBuffer = make([]byte, MaxValueSize*2)
 	p.xp = new(FixedPair)
+	p.localKey = key
 	return p
+}
+
+func (p *ExternalDeserializer) OnHandshake(pubkey sgo.PublicKey) error {
+	return nil
 }
 
 func (p *ExternalDeserializer) Version() Version {
