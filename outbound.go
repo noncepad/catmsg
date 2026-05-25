@@ -2,12 +2,8 @@ package catmsg
 
 import (
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"log/slog"
 	"time"
-
-	sgo "github.com/gagliardetto/solana-go"
 )
 
 type ExternalSerializer struct {
@@ -18,10 +14,9 @@ type ExternalSerializer struct {
 	byteUint64 []byte
 	index      int
 	buffer     []byte
-	localKey   sgo.PrivateKey
 }
 
-func NewExternalSerializer(logger *slog.Logger, key sgo.PrivateKey) *ExternalSerializer {
+func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
 	s := new(ExternalSerializer)
 	s.logger = logger
 	s.nonce = 0
@@ -30,12 +25,7 @@ func NewExternalSerializer(logger *slog.Logger, key sgo.PrivateKey) *ExternalSer
 	s.byteUint64 = make([]byte, 8)
 	s.index = 0
 	s.buffer = make([]byte, BUFMAX)
-	s.localKey = key
 	return s
-}
-
-func (p *ExternalSerializer) OnHandshake(pubkey sgo.PublicKey) error {
-	return nil
 }
 
 func (p *ExternalSerializer) Version() Version {
@@ -66,6 +56,16 @@ func (p *ExternalSerializer) writeHeader(cmdTag CommandTag, bodySize int) {
 	p.index += 4
 }
 
+func (p *ExternalSerializer) EncryptedCustom(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	p.writeHeader(CmdCustom, len(data))
+	slice := p.buffer[p.index:(p.index + len(data))]
+	copy(slice[:], data[:])
+	p.index += len(data)
+}
+
 func (p *ExternalSerializer) Ping(t time.Time) {
 	p.writeHeader(CmdPing, 8)
 	slice := p.buffer[p.index:(p.index + 8)]
@@ -75,38 +75,6 @@ func (p *ExternalSerializer) Ping(t time.Time) {
 
 func (p *ExternalSerializer) Shutdown() {
 	p.writeHeader(CmdShutdown, 0)
-}
-
-type customMessage interface {
-	Key() []byte
-	Value() []byte
-}
-
-func (p *ExternalSerializer) Custom(custom customMessage) error {
-	key := custom.Key()
-	value := custom.Value()
-	if key == nil {
-		return errors.New("blank key")
-	}
-	if value == nil {
-		return errors.New("blank value")
-	}
-	if MaxKeySize < len(key) {
-		return fmt.Errorf("key too big: %d vs %d", MaxKeySize, len(key))
-	}
-	if MaxValueSize < len(value) {
-		return fmt.Errorf("value too big: %d vs %d", MaxValueSize, len(value))
-	}
-	p.writeHeader(CmdCustom, 1+len(key)+2+len(value))
-	p.buffer[p.index] = uint8(len(key))
-	p.index += 1
-	copy(p.buffer[p.index:p.index+len(key)], key[:])
-	p.index += len(key)
-	binary.LittleEndian.PutUint16(p.buffer[p.index:p.index+2], uint16(len(value)))
-	p.index += 2
-	copy(p.buffer[p.index:p.index+len(value)], value[:])
-	p.index += len(value)
-	return nil
 }
 
 // Flush dumps a byte slice of written data. the index resets to 0.

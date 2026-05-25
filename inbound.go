@@ -1,13 +1,13 @@
 package catmsg
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
-	common "git.noncepad.com/pkg/solpipe-util/common"
 	sgo "github.com/gagliardetto/solana-go"
 )
 
@@ -23,13 +23,14 @@ type MessageInboundCallback interface {
 	OnPong(time.Time) error
 	OnPubkey(name []byte, pubkey sgo.PublicKey) error
 	// OnCustom is for custom messages.
-	OnCustom(FixedPair) error
+	OnCustomRaw([]byte) error
 }
 
 type Data interface {
 	Slice() []byte
 }
 type ExternalDeserializer struct {
+	ctx            context.Context
 	logger         *slog.Logger
 	xp             *FixedPair
 	nonce          uint32
@@ -37,24 +38,31 @@ type ExternalDeserializer struct {
 	action         MessageInboundCallback
 	index          int
 	leftoverBuffer []byte
-	stream         *common.EncryptedStream
+	hasDataChannel bool
+	dataC          chan<- []byte
 	localKey       sgo.PrivateKey
 }
 
-func NewExternalDeserializer(action MessageInboundCallback, logger *slog.Logger, key sgo.PrivateKey) *ExternalDeserializer {
+func NewExternalDeserializer(ctx context.Context, action MessageInboundCallback, logger *slog.Logger) *ExternalDeserializer {
 	p := new(ExternalDeserializer)
+	p.ctx = ctx
 	p.action = action
 	p.logger = logger
 	p.nonce = 0
 	p.version = ProtoclV1
 	p.index = 0
+	p.hasDataChannel = false
 	p.leftoverBuffer = make([]byte, MaxValueSize*2)
 	p.xp = new(FixedPair)
-	p.localKey = key
 	return p
 }
 
-func (p *ExternalDeserializer) OnHandshake(pubkey sgo.PublicKey) error {
+func (p *ExternalDeserializer) OnHandshake(dataC chan<- []byte) error {
+	if p.hasDataChannel {
+		return errors.New("duplicate handshake")
+	}
+	p.hasDataChannel = true
+	p.dataC = dataC
 	return nil
 }
 
@@ -137,16 +145,24 @@ loop:
 			copy(pubkey[:], pair.Value())
 			err = p.action.OnPubkey(pair.Key(), pubkey)
 		case CmdCustom:
-			var pair FixedPair
-			pair, consumed, err = extractPairV2(payload)
+			if !p.hasDataChannel {
+				return errors.New("missing data channel")
+			}
+			var out []byte
+			out, consumed, err = extractCustom(payload)
 			if err == ErrInsufficientBytes {
 				i = msgStart
 				break loop
-			}
-			if err != nil {
+			} else if err != nil {
 				return err
 			}
-			err = p.action.OnCustom(pair)
+			x := make([]byte, len(out))
+			copy(x[:], out[:])
+			select {
+			case <-p.ctx.Done():
+				return p.ctx.Err()
+			case p.dataC <- x:
+			}
 		default:
 			return fmt.Errorf("unknown command %d", cmdValue)
 		}
@@ -169,6 +185,20 @@ loop:
 		p.index = 0
 	}
 	return nil
+}
+
+func extractCustom(data []byte) ([]byte, int, error) {
+	if len(data) < 2 {
+		return nil, 0, ErrInsufficientBytes
+	}
+	n := int(binary.LittleEndian.Uint16(data[0:2]))
+	if BUFMAX < n {
+		return nil, 0, fmt.Errorf("too big: %d", n)
+	}
+	if len(data) < 2+n {
+		return nil, 0, ErrInsufficientBytes
+	}
+	return data[2 : 2+n], 2 + n, nil
 }
 
 func extractPairV2(data []byte) (FixedPair, int, error) {
