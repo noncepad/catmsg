@@ -60,9 +60,10 @@ func (p *ExternalSerializer) EncryptedCustom(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	p.writeHeader(CmdCustom, len(data))
-	slice := p.buffer[p.index:(p.index + len(data))]
-	copy(slice[:], data[:])
+	p.writeHeader(CmdCustom, 2+len(data))
+	binary.LittleEndian.PutUint16(p.buffer[p.index:p.index+2], uint16(len(data)))
+	p.index += 2
+	copy(p.buffer[p.index:p.index+len(data)], data)
 	p.index += len(data)
 }
 

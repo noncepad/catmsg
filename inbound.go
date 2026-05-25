@@ -40,7 +40,6 @@ type ExternalDeserializer struct {
 	leftoverBuffer []byte
 	hasDataChannel bool
 	dataC          chan<- []byte
-	localKey       sgo.PrivateKey
 }
 
 func NewExternalDeserializer(ctx context.Context, action MessageInboundCallback, logger *slog.Logger) *ExternalDeserializer {
