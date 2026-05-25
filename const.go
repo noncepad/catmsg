@@ -1,14 +1,5 @@
 package catmsg
 
-const (
-	STATUSKEY_INSTRUCTION  string = "bot_instruction_v1"
-	STATUSKEY_BOT_PUBKEY   string = "bot_pubkey_v1"
-	STATUSKEY_BOT_LAMPORTS string = "bot_lamports_v1"
-	// send a command to the bot
-	SETTINGS_WALLET string = "mothership_wallet_v1"
-	SETTINGS_PING   string = "mothership_ping_v1"
-)
-
 // IsArrayEqual checks if two arrays are equal.
 func IsArrayEqual[T comparable](a, b []T) bool {
 	if len(a) != len(b) {
@@ -22,12 +13,14 @@ func IsArrayEqual[T comparable](a, b []T) bool {
 	return true
 }
 
-func IsBotPubkey(key []byte) bool {
-	x := []byte(STATUSKEY_BOT_PUBKEY)
-	return IsArrayEqual(x, key)
-}
+const (
+	MaxKeySize   = 64
+	MaxValueSize = BUFMAX - MaxKeySize - 128
+	EntrySize    = MaxKeySize + 4 + MaxValueSize // 1092 bytes
+)
 
-func IsBotLamports(key []byte) bool {
-	x := []byte(STATUSKEY_BOT_LAMPORTS)
-	return IsArrayEqual(x, key)
-}
+const (
+	EnvMothershipWallet string = "MOTHERSHIP_PUBKEY"
+	EnvRuntimePipeline  string = "PIPELINE"
+	EnvLogLevel         string = "LOG_LEVEL"
+)

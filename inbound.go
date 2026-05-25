@@ -231,35 +231,3 @@ func extractPairV2(data []byte) (FixedPair, int, error) {
 	k += fp.lenV
 	return fp, k, nil
 }
-
-func (fp *FixedPair) extractPair(remainingData []byte) (FixedPair, error) {
-	// key value
-	k := 0
-	if len(remainingData[k:]) != 1 {
-		return *fp, ErrInsufficientBytes
-	}
-	fp.lenK = int(remainingData[k])
-	k++
-	if fp.lenK == 0 || MaxKeySize < fp.lenK {
-		return *fp, errors.New("bad key size")
-	}
-	copy(fp.key[:fp.lenK], remainingData[k:k+fp.lenK])
-	k += fp.lenK
-	if len(remainingData[k:]) < 2 {
-		return *fp, ErrInsufficientBytes
-	}
-	fp.lenV = int(binary.LittleEndian.Uint16(remainingData[k : k+2]))
-	if MaxValueSize < fp.lenV {
-		return *fp, errors.New("bad value size")
-	}
-	k += 2
-	if len(remainingData[k:]) < fp.lenV {
-		return *fp, ErrInsufficientBytes
-	}
-	copy(fp.value[:fp.lenV], remainingData[k:k+fp.lenV])
-	k += fp.lenV
-	if len(remainingData[k:]) != 0 {
-		return *fp, fmt.Errorf("mismatch data size: %d vs %d", 0, len(remainingData[k:]))
-	}
-	return *fp, nil
-}
