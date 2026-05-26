@@ -140,9 +140,22 @@ loop:
 			if pair.lenV != sgo.PublicKeyLength {
 				return fmt.Errorf("bad public key length: %d", pair.lenV)
 			}
+			key := pair.Key()
+			if len(key) == 0 {
+				return errors.New("blank key")
+			}
 			var pubkey sgo.PublicKey
-			copy(pubkey[:], pair.Value())
-			err = p.action.OnPubkey(pair.Key(), pubkey)
+			value := pair.Value()
+			if len(value) != sgo.PublicKeyLength {
+				return fmt.Errorf("public key mismatch: %d vs %d", len(value), sgo.PublicKeyLength)
+			}
+			copy(pubkey[:], value)
+			if key[0] == 0 {
+				// handshake
+				err = p.action.OnHandshake(pubkey)
+			} else {
+				err = p.action.OnPubkey(pair.Key(), pubkey)
+			}
 		case CmdCustom:
 			if !p.hasDataChannel {
 				return errors.New("missing data channel")
