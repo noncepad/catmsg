@@ -39,7 +39,6 @@ type ExternalDeserializer struct {
 	index          int
 	leftoverBuffer []byte
 	hasDataChannel bool
-	dataC          chan<- []byte
 }
 
 func NewExternalDeserializer(ctx context.Context, action MessageInboundCallback, logger *slog.Logger) *ExternalDeserializer {
@@ -56,12 +55,11 @@ func NewExternalDeserializer(ctx context.Context, action MessageInboundCallback,
 	return p
 }
 
-func (p *ExternalDeserializer) OnHandshake(dataC chan<- []byte) error {
+func (p *ExternalDeserializer) OnHandshake() error {
 	if p.hasDataChannel {
 		return errors.New("duplicate handshake")
 	}
 	p.hasDataChannel = true
-	p.dataC = dataC
 	return nil
 }
 
@@ -85,6 +83,7 @@ func (p *ExternalDeserializer) Parse(indata []byte) error {
 		data = indata
 	}
 
+	var err error
 	i := 0
 loop:
 	for i < len(data) {
@@ -110,12 +109,15 @@ loop:
 
 		payload := data[i:]
 		var consumed int
-		var err error
 
 		switch cmdValue {
 		case CmdDump:
 			consumed = 0
 			err = p.action.OnDump()
+			if err != nil {
+				err = fmt.Errorf("OnDump error: %s", err)
+				break loop
+			}
 		case CmdPong:
 			if len(payload) < 8 {
 				i = msgStart
@@ -123,9 +125,14 @@ loop:
 			}
 			v := binary.LittleEndian.Uint64(payload[:8])
 			if v == 0 {
-				return errors.New("blank Pong timestamp")
+				err = errors.New("blank Pong timestamp")
+				break loop
 			}
 			err = p.action.OnPong(time.Unix(int64(v), 0))
+			if err != nil {
+				err = fmt.Errorf("OnPong error: %s", err)
+				break loop
+			}
 			consumed = 8
 		case CmdPubkey:
 			var pair FixedPair
@@ -135,30 +142,43 @@ loop:
 				break loop
 			}
 			if err != nil {
-				return err
+				err = fmt.Errorf("CmdPubkey error: %s", err)
+				break loop
 			}
 			if pair.lenV != sgo.PublicKeyLength {
-				return fmt.Errorf("bad public key length: %d", pair.lenV)
+				err = fmt.Errorf("bad public key length: %d", pair.lenV)
+				break loop
 			}
 			key := pair.Key()
 			if len(key) == 0 {
-				return errors.New("blank key")
+				err = errors.New("blank key")
+				break loop
 			}
 			var pubkey sgo.PublicKey
 			value := pair.Value()
 			if len(value) != sgo.PublicKeyLength {
-				return fmt.Errorf("public key mismatch: %d vs %d", len(value), sgo.PublicKeyLength)
+				err = fmt.Errorf("public key mismatch: %d vs %d", len(value), sgo.PublicKeyLength)
+				break loop
 			}
 			copy(pubkey[:], value)
 			if key[0] == 0 {
 				// handshake
 				err = p.action.OnHandshake(pubkey)
+				if err != nil {
+					err = fmt.Errorf("OnHandshake error: %s", err)
+					break loop
+				}
 			} else {
 				err = p.action.OnPubkey(pair.Key(), pubkey)
+				if err != nil {
+					err = fmt.Errorf("OnPubkey error: %s", err)
+					break loop
+				}
 			}
 		case CmdCustom:
 			if !p.hasDataChannel {
-				return errors.New("missing data channel")
+				err = errors.New("missing data channel")
+				break loop
 			}
 			var out []byte
 			out, consumed, err = extractCustom(payload)
@@ -166,24 +186,25 @@ loop:
 				i = msgStart
 				break loop
 			} else if err != nil {
-				return err
+				err = fmt.Errorf("extractCustom error: %s", err)
+				break loop
 			}
 			x := make([]byte, len(out))
 			copy(x[:], out[:])
-			select {
-			case <-p.ctx.Done():
-				return p.ctx.Err()
-			case p.dataC <- x:
+			err = p.action.OnCustomRaw(x)
+			if err != nil {
+				err = fmt.Errorf("custom error: %s", err)
 			}
 		default:
-			return fmt.Errorf("unknown command %d", cmdValue)
-		}
-
-		if err != nil {
-			return err
+			err = fmt.Errorf("unknown command %d", cmdValue)
+			break loop
 		}
 		i += consumed
 		p.nonce++
+	}
+	if err == ErrInsufficientBytes {
+	} else if err != nil {
+		return err
 	}
 
 	leftover := len(data) - i
@@ -222,7 +243,7 @@ func extractPairV2(data []byte) (FixedPair, int, error) {
 	fp.lenK = int(data[k])
 	k++
 	if fp.lenK == 0 || MaxKeySize < fp.lenK {
-		return fp, 0, errors.New("bad key size")
+		return fp, 0, fmt.Errorf("bad key size: %d vs %d", MaxKeySize, fp.lenK)
 	}
 	if len(data)-k < fp.lenK {
 		return fp, 0, ErrInsufficientBytes
@@ -234,7 +255,7 @@ func extractPairV2(data []byte) (FixedPair, int, error) {
 	}
 	fp.lenV = int(binary.LittleEndian.Uint16(data[k : k+2]))
 	if MaxValueSize < fp.lenV {
-		return fp, 0, errors.New("bad value size")
+		return fp, 0, fmt.Errorf("bad value size: %d vs %d", MaxValueSize, fp.lenV)
 	}
 	k += 2
 	if len(data)-k < fp.lenV {

@@ -21,6 +21,7 @@ const (
 
 const (
 	EnvMothershipWallet string = "MOTHERSHIP_PUBKEY"
+	EnvRevision         string = "BOT_REVISION"
 	EnvRuntimePipeline  string = "PIPELINE"
 	EnvLogLevel         string = "LOG_LEVEL"
 )
