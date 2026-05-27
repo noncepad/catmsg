@@ -99,12 +99,16 @@ loop:
 		checkVersion := data[i]
 		i++
 		if p.version != checkVersion {
-			return fmt.Errorf("version mismatch: %d vs %d", p.version, checkVersion)
+			err = fmt.Errorf("version mismatch: %d vs %d", p.version, checkVersion)
+			i = msgStart
+			break loop
 		}
 		checkNonce := binary.LittleEndian.Uint32(data[i : i+4])
 		i += 4
 		if p.nonce != checkNonce {
-			return fmt.Errorf("nonce mismatch: %d vs %d", p.nonce, checkNonce)
+			err = fmt.Errorf("nonce mismatch: %d vs %d", p.nonce, checkNonce)
+			i = msgStart
+			break loop
 		}
 
 		payload := data[i:]
@@ -194,6 +198,7 @@ loop:
 			err = p.action.OnCustomRaw(x)
 			if err != nil {
 				err = fmt.Errorf("custom error: %s", err)
+				break loop
 			}
 		default:
 			err = fmt.Errorf("unknown command %d", cmdValue)
