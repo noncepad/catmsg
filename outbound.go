@@ -2,6 +2,7 @@ package catmsg
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -19,7 +20,7 @@ type ExternalSerializer struct {
 func NewExternalSerializer(logger *slog.Logger) *ExternalSerializer {
 	s := new(ExternalSerializer)
 	s.logger = logger
-	s.nonce = 0
+	s.nonce = 1
 	s.version = ProtoclV1
 	s.blankKey = make([]byte, 0)
 	s.byteUint64 = make([]byte, 8)
@@ -56,17 +57,6 @@ func (p *ExternalSerializer) writeHeader(cmdTag CommandTag, bodySize int) {
 	p.index += 4
 }
 
-func (p *ExternalSerializer) EncryptedCustom(data []byte) {
-	if len(data) == 0 {
-		return
-	}
-	p.writeHeader(CmdCustom, 2+len(data))
-	binary.LittleEndian.PutUint16(p.buffer[p.index:p.index+2], uint16(len(data)))
-	p.index += 2
-	copy(p.buffer[p.index:p.index+len(data)], data)
-	p.index += len(data)
-}
-
 func (p *ExternalSerializer) Ping(t time.Time) {
 	p.writeHeader(CmdPing, 8)
 	slice := p.buffer[p.index:(p.index + 8)]
@@ -83,4 +73,24 @@ func (p *ExternalSerializer) Flush() []byte {
 	i := p.index
 	p.index = 0
 	return p.buffer[0:i]
+}
+
+func (p *ExternalSerializer) CustomRaw(data []byte) error {
+	if MaxValueSize-100 < len(data) {
+		return fmt.Errorf("too much data: %d vs %d", MaxValueSize-100, len(data))
+	}
+	p.writeHeader(CmdCustom, 2+len(data))
+	{
+
+		slice := p.buffer[p.index:(p.index + 2)]
+		p.index += 2
+		binary.LittleEndian.PutUint16(slice[:], uint16(len(data)))
+	}
+	{
+
+		slice := p.buffer[p.index:(p.index + len(data))]
+		copy(slice, data)
+		p.index += len(data)
+	}
+	return nil
 }

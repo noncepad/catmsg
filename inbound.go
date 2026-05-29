@@ -46,7 +46,7 @@ func NewExternalDeserializer(ctx context.Context, action MessageInboundCallback,
 	p.ctx = ctx
 	p.action = action
 	p.logger = logger
-	p.nonce = 0
+	p.nonce = 1
 	p.version = ProtoclV1
 	p.index = 0
 	p.hasDataChannel = false
@@ -110,6 +110,7 @@ loop:
 			i = msgStart
 			break loop
 		}
+		p.nonce++
 
 		payload := data[i:]
 		var consumed int
@@ -139,6 +140,7 @@ loop:
 			}
 			consumed = 8
 		case CmdPubkey:
+			p.logger.Info(fmt.Sprintf("extractPairV2 %d; size %d", checkNonce, len(payload)))
 			var pair FixedPair
 			pair, consumed, err = extractPairV2(payload)
 			if err == ErrInsufficientBytes {
@@ -193,9 +195,7 @@ loop:
 				err = fmt.Errorf("extractCustom error: %s", err)
 				break loop
 			}
-			x := make([]byte, len(out))
-			copy(x[:], out[:])
-			err = p.action.OnCustomRaw(x)
+			err = p.action.OnCustomRaw(out)
 			if err != nil {
 				err = fmt.Errorf("custom error: %s", err)
 				break loop
@@ -205,9 +205,9 @@ loop:
 			break loop
 		}
 		i += consumed
-		p.nonce++
 	}
 	if err == ErrInsufficientBytes {
+		p.nonce--
 	} else if err != nil {
 		return err
 	}
